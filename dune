@@ -1,0 +1,18 @@
+(executable
+  (name hermit_exe)
+  (libraries core)
+  (modules hermit_exe)
+  (preprocess (
+    pps
+    ppx_here
+    ppx_deriving
+    ppx_sexp_conv
+    ppx_custom_printf
+    ppx_inline_test
+    ppx_expect
+    )))
+(env
+ (dev
+   (flags (:standard -w -26)))
+    (release
+      (flags (:standard))))

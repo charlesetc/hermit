@@ -1,0 +1,1 @@
+let () = Hermit.Bin.main ()
