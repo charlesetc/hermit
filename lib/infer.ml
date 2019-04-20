@@ -202,11 +202,13 @@ let%test_module "type inference tests" =
 
     let%expect_test "printing type variables" =
       fn "x" (var "x") |> eval_type_and_print ;
-      [%expect {|
+      [%expect
+        {|
         type of tree: ('a -> 'a)
         evaluated to: \x{ x } |}] ;
       fn "x" (fn "y" (var "x")) |> eval_type_and_print ;
-      [%expect{|
+      [%expect
+        {|
         type of tree: ('a -> ('b -> 'a))
         evaluated to: \x{ \y{ x } } |}]
 
