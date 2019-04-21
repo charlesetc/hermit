@@ -11,6 +11,7 @@ and 'metadata t =
   | Value of 'metadata * 'metadata value
   | Var of 'metadata * string
   | App of 'metadata * 'metadata t * 'metadata t
+  | Let of 'metadata * string * 'metadata t * 'metadata t
 [@@deriving sexp]
 
 let metadata = function
@@ -20,21 +21,27 @@ let metadata = function
       m
   | App (m, _, _) ->
       m
+  | Let (m, _, _, _) ->
+      m
 
-let rec to_string ~add_metadata = function
-  | Value (m, Bool b) ->
-      string_of_bool b |> add_metadata m
-  | Value (m, Int i) ->
-      string_of_int i |> add_metadata m
-  | Value (m, String s) ->
-      "\"" ^ String.escaped s ^ "\"" |> add_metadata m
-  | Value (m, Lambda (x, a)) ->
-      "\\" ^ x ^ "{ " ^ to_string ~add_metadata a ^ " }" |> add_metadata m
-  | Var (m, s) ->
-      s |> add_metadata m
-  | App (m, a, b) ->
-      "(" ^ to_string ~add_metadata a ^ " " ^ to_string ~add_metadata b ^ ")"
-      |> add_metadata m
+let to_string ~add_metadata =
+  let rec lp = function
+    | Value (m, Bool b) ->
+        string_of_bool b |> add_metadata m
+    | Value (m, Int i) ->
+        string_of_int i |> add_metadata m
+    | Value (m, String s) ->
+        "\"" ^ String.escaped s ^ "\"" |> add_metadata m
+    | Value (m, Lambda (x, a)) ->
+        "\\" ^ x ^ "{ " ^ lp a ^ " }" |> add_metadata m
+    | Var (m, s) ->
+        s |> add_metadata m
+    | App (m, a, b) ->
+        "(" ^ lp a ^ " " ^ lp b ^ ")" |> add_metadata m
+    | Let (m, x, a, b) ->
+        "(let " ^ x ^ " = " ^ lp a ^ " in " ^ lp b ^ ")" |> add_metadata m
+  in
+  lp
 
 let to_string ?(metadata_to_string = fun _ -> None) ?(sep = "::") =
   to_string ~add_metadata:(fun m s ->

@@ -15,10 +15,14 @@ let substitute x a ~within:b =
         App (m, lp a, lp b)
     | Value (m, v) ->
         Value (m, v)
+    | Let (m, y, a, b) ->
+        if y = x then Let (m, y, a, b) else Let (m, y, lp a, lp b)
   in
   lp b
 
 let rec step ast =
+  (* Very useful in the too see all the steps taken: *)
+  (* Core.printf !"%{sexp: unit Ast.t}\n" [%here] ast ; *)
   let open Ast in
   match ast with
   | Value _ ->
@@ -33,5 +37,9 @@ let rec step ast =
       `Continue (App (m, a, eval b))
   | App (m, a, b) ->
       `Continue (App (m, eval a, b))
+  | Let (_, x, (Value _ as a), b) ->
+      `Continue (substitute x a ~within:b)
+  | Let (m, x, a, b) ->
+      `Continue (Let (m, x, eval a, b))
 
 and eval a = match step a with `Continue a -> eval a | `Done a -> a

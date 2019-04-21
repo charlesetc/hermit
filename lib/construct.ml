@@ -9,3 +9,5 @@ let int i = Value ((), Int i)
 let str s = Value ((), String s)
 
 let fn x a = Value ((), Lambda (x, a))
+
+let lt x a b = Let ((), x, a, b)

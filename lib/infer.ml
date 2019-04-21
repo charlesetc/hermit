@@ -101,6 +101,7 @@ and union_types phi ~a ~b = function
   | Arrow { arg = a_arg; ret = a_ret }, Arrow { arg = b_arg; ret = b_ret } ->
       (* note to self: this could be a point of parallelization,
              * although we may have to change to random indices instead
+             *
              * of auto-incrementing onec. *)
       union phi a_arg b_arg ;
       union phi a_ret b_ret
@@ -135,13 +136,19 @@ let rec constraints ~env ~phi = function
   | Ast.Var (k, name) ->
       let var_type = Map.find_exn env name in
       union phi k var_type
-  | Ast.App (ret, a_ast, b_ast) ->
+  | Ast.App (k, a_ast, b_ast) ->
       constraints ~env ~phi a_ast ;
       constraints ~env ~phi b_ast ;
       let fn, arg = (Ast.metadata a_ast, Ast.metadata b_ast) in
-      union_to phi fn (Arrow { arg; ret })
+      union_to phi fn (Arrow { arg; ret = k })
+  | Ast.Let (k, x, a_ast, b_ast) ->
+      let x_type = Ast.metadata a_ast in
+      constraints ~env ~phi a_ast ;
+      let env = Map.set env ~key:x ~data:x_type in
+      constraints ~env ~phi b_ast ;
+      union phi k (Ast.metadata b_ast)
 
-let add_new_variables ~phi =
+let add_type_variables ~phi =
   let type_var () = new_type_var phi in
   let rec lp = function
     | Ast.Value ((), Ast.Lambda (name, body)) ->
@@ -156,12 +163,14 @@ let add_new_variables ~phi =
         Ast.App (type_var (), lp a, lp b)
     | Ast.Var ((), s) ->
         Ast.Var (type_var (), s)
+    | Ast.Let ((), x, a, b) ->
+        Ast.Let (type_var (), x, lp a, lp b)
   in
   lp
 
 let typecheck tree =
   let phi = Int.Table.create () in
-  let tree = add_new_variables ~phi tree in
+  let tree = add_type_variables ~phi tree in
   constraints ~env:String.Map.empty ~phi tree ;
   let rec lp = function
     | Ast.Value (m, Ast.Lambda (name, body)) ->
@@ -176,6 +185,8 @@ let typecheck tree =
         Ast.Var (extract_full_type ~phi m, name)
     | Ast.App (m, a, b) ->
         Ast.App (extract_full_type ~phi m, lp a, lp b)
+    | Ast.Let (m, x, a, b) ->
+        Ast.Let (extract_full_type ~phi m, x, lp a, lp b)
   in
   lp tree
 
@@ -213,9 +224,12 @@ let%test_module "type inference tests" =
         evaluated to: \x{ \y{ x } } |}]
 
     let%expect_test "two variables" =
-      app (app (fn "x" (fn "y" (var "x"))) (str "2")) (int 3)
+      lt "id" (fn "x" (var "x")) (lt "_" (app (var "id") (int 2)) (var "id"))
       |> eval_type_and_print ;
-      [%expect {|
-        type of tree: string
-        evaluated to: "2" |}]
+      (*! Notice that this is inferred to be monomorphic. The addition of
+       * polymorphic type inference will fix that! *)
+      [%expect
+        {|
+        type of tree: (int -> int)
+        evaluated to: \x{ x } |}]
   end )
