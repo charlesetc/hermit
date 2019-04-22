@@ -1,13 +1,11 @@
-open Ast
+let app a b = `App ((), a, b)
 
-let app a b = App ((), a, b)
+let var x = `Var ((), x)
 
-let var x = Var ((), x)
+let int i = `Value ((), `Int i)
 
-let int i = Value ((), Int i)
+let str s = `Value ((), `String s)
 
-let str s = Value ((), String s)
+let fn x a = `Value ((), `Lambda (x, a))
 
-let fn x a = Value ((), Lambda (x, a))
-
-let lt x a b = Let ((), x, a, b)
+let lt x a b = `Let ((), x, a, b)

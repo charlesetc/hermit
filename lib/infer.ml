@@ -184,19 +184,19 @@ end
 
 let rec constraints ~env ~phi ast =
   match ast with
-  | Ast.Value (k, Ast.Int _i) ->
+  | `Value (k, `Int _i) ->
       Phi.union_to phi k Int
-  | Ast.Value (k, Ast.Bool _b) ->
+  | `Value (k, `Bool _b) ->
       Phi.union_to phi k Bool
-  | Ast.Value (k, Ast.String _s) ->
+  | `Value (k, `String _s) ->
       Phi.union_to phi k String
-  | Ast.Value (k, Ast.Lambda (name, body)) ->
+  | `Value (k, `Lambda (name, body)) ->
       let arg = Phi.new_type_var phi in
       let env = Env.add env name (Polytype.Monotype arg) in
       constraints ~env ~phi body ;
       let ret = Ast.metadata body in
       Phi.union_to phi k (Arrow { arg; ret })
-  | Ast.Var (k, name) ->
+  | `Var (k, name) ->
     ( match Env.lookup env name with
     | Polytype.Monotype var_type ->
         Phi.union phi k var_type
@@ -205,12 +205,12 @@ let rec constraints ~env ~phi ast =
           Phi.copy_quantified phi ~quantified_variables var_type
         in
         Phi.union phi k var_type )
-  | Ast.App (k, a_ast, b_ast) ->
+  | `App (k, a_ast, b_ast) ->
       constraints ~env ~phi a_ast ;
       constraints ~env ~phi b_ast ;
       let fn, arg = (Ast.metadata a_ast, Ast.metadata b_ast) in
       Phi.union_to phi fn (Arrow { arg; ret = k })
-  | Ast.Let (k, x, a_ast, b_ast) ->
+  | `Let (k, x, a_ast, b_ast) ->
       constraints ~env ~phi a_ast ;
       let ta = Ast.metadata a_ast in
       let fvs = Phi.free_variables phi ta in
@@ -221,20 +221,20 @@ let rec constraints ~env ~phi ast =
 let add_type_variables ~phi =
   let type_var () = Phi.new_type_var phi in
   let rec lp = function
-    | Ast.Value ((), Ast.Lambda (name, body)) ->
-        Ast.Value (type_var (), Ast.Lambda (name, lp body))
-    | Ast.Value ((), Ast.Int i) ->
-        Ast.Value (type_var (), Ast.Int i)
-    | Ast.Value ((), Ast.String s) ->
-        Ast.Value (type_var (), Ast.String s)
-    | Ast.Value ((), Ast.Bool b) ->
-        Ast.Value (type_var (), Ast.Bool b)
-    | Ast.App ((), a, b) ->
-        Ast.App (type_var (), lp a, lp b)
-    | Ast.Var ((), s) ->
-        Ast.Var (type_var (), s)
-    | Ast.Let ((), x, a, b) ->
-        Ast.Let (type_var (), x, lp a, lp b)
+    | `Value ((), `Lambda (name, body)) ->
+        `Value (type_var (), `Lambda (name, lp body))
+    | `Value ((), `Int i) ->
+        `Value (type_var (), `Int i)
+    | `Value ((), `String s) ->
+        `Value (type_var (), `String s)
+    | `Value ((), `Bool b) ->
+        `Value (type_var (), `Bool b)
+    | `App ((), a, b) ->
+        `App (type_var (), lp a, lp b)
+    | `Var ((), s) ->
+        `Var (type_var (), s)
+    | `Let ((), x, a, b) ->
+        `Let (type_var (), x, lp a, lp b)
   in
   lp
 
@@ -243,20 +243,20 @@ let typecheck tree =
   let tree = add_type_variables ~phi tree in
   constraints ~env:Env.empty ~phi tree ;
   let rec lp = function
-    | Ast.Value (m, Ast.Lambda (name, body)) ->
-        Ast.Value (extract_full_type ~phi m, Ast.Lambda (name, lp body))
-    | Ast.Value (m, Ast.Int i) ->
-        Ast.Value (extract_full_type ~phi m, Ast.Int i)
-    | Ast.Value (m, Ast.String s) ->
-        Ast.Value (extract_full_type ~phi m, Ast.String s)
-    | Ast.Value (m, Ast.Bool b) ->
-        Ast.Value (extract_full_type ~phi m, Ast.Bool b)
-    | Ast.Var (m, name) ->
-        Ast.Var (extract_full_type ~phi m, name)
-    | Ast.App (m, a, b) ->
-        Ast.App (extract_full_type ~phi m, lp a, lp b)
-    | Ast.Let (m, x, a, b) ->
-        Ast.Let (extract_full_type ~phi m, x, lp a, lp b)
+    | `Value (m, `Lambda (name, body)) ->
+        `Value (extract_full_type ~phi m, `Lambda (name, lp body))
+    | `Value (m, `Int i) ->
+        `Value (extract_full_type ~phi m, `Int i)
+    | `Value (m, `String s) ->
+        `Value (extract_full_type ~phi m, `String s)
+    | `Value (m, `Bool b) ->
+        `Value (extract_full_type ~phi m, `Bool b)
+    | `Var (m, name) ->
+        `Var (extract_full_type ~phi m, name)
+    | `App (m, a, b) ->
+        `App (extract_full_type ~phi m, lp a, lp b)
+    | `Let (m, x, a, b) ->
+        `Let (extract_full_type ~phi m, x, lp a, lp b)
   in
   lp tree
 
@@ -270,8 +270,6 @@ let%test_module "type inference tests" =
       match Eval.eval ast with
       | ast ->
           printf "evaluated to: %s" (Ast.to_string ast)
-      | exception Eval.Error (message, ast) ->
-          eprintf "Error %s %s" message (Ast.to_string ast)
       | exception e ->
           eprintf !"Got unknown error: %{Exn}" e
 
@@ -314,4 +312,30 @@ let%test_module "type inference tests" =
       [%expect {|
         type of tree: string
         evaluated to: "hi" |}]
+
+    let%expect_test "playing with id" =
+      app (fn "x" (var "x")) (fn "x" (var "x")) |> eval_type_and_print ;
+      [%expect
+        {|
+        type of tree: ('a -> 'a)
+        evaluated to: \x{ x } |}] ;
+      lt "id" (fn "x" (var "x")) (app (var "id") (var "id"))
+      |> eval_type_and_print ;
+      [%expect
+        {|
+        type of tree: ('a -> 'a)
+        evaluated to: \x{ x }  |}]
+
+    let%expect_test "playing with id" =
+      app (fn "x" (var "x")) (fn "x" (var "x")) |> eval_type_and_print ;
+      [%expect
+        {|
+        type of tree: ('a -> 'a)
+        evaluated to: \x{ x } |}] ;
+      lt "id" (fn "x" (var "x")) (app (var "id") (var "id"))
+      |> eval_type_and_print ;
+      [%expect
+        {|
+        type of tree: ('a -> 'a)
+        evaluated to: \x{ x }  |}]
   end )
