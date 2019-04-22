@@ -24,6 +24,21 @@ let metadata = function
   | Let (m, _, _, _) ->
       m
 
+let map_metadata f =
+  let rec lp = function
+    | Value (m, Lambda (x, b)) ->
+        Value (f m, Lambda (x, lp b))
+    | Value (m, v) ->
+        Value (f m, v)
+    | Var (m, v) ->
+        Var (f m, v)
+    | App (m, a, b) ->
+        App (f m, lp a, lp b)
+    | Let (m, x, a, b) ->
+        Let (f m, x, lp a, lp b)
+  in
+  lp
+
 let to_string ~add_metadata =
   let rec lp = function
     | Value (m, Bool b) ->

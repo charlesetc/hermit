@@ -1,8 +1,5 @@
 open Core
 
-(*! phi module *)
-(* module Phi = struct end *)
-
 module IType = struct
   type t =
     | Arrow of { arg : int; ret : int }
@@ -12,29 +9,143 @@ module IType = struct
   [@@deriving sexp]
 end
 
-type node =
-  | Alias of int
-  | Leaf of IType.t option
-[@@deriving sexp]
+module Phi = struct
+  module Node = struct
+    type t =
+      | Alias of int
+      | Leaf of IType.t option
+    [@@deriving sexp]
+  end
 
-type phi = node Int.Table.t
+  type t = Node.t Int.Table.t [@@deriving sexp]
 
-let rec find_exn phi a =
-  match Hashtbl.find phi a with
-  | Some (Alias i) ->
-      find_exn phi i
-  | Some (Leaf t) ->
-      (a, t)
-  | None ->
-      failwithf
-        !"unable to find variable %d in typing environment %{sexp: node \
-          Int.Table.t}"
-        a
-        phi
-        ()
+  let rec find_exn phi a =
+    match Hashtbl.find phi a with
+    | Some (Node.Alias i) ->
+        find_exn phi i
+    | Some (Node.Leaf t) ->
+        (a, t)
+    | None ->
+        failwithf
+          !"unable to find variable %d in typing environment %{sexp: Node.t \
+            Int.Table.t}"
+          a
+          phi
+          ()
+
+  let find_or_insert phi a =
+    let a_val = None in
+    match Hashtbl.add phi ~key:a ~data:(Node.Leaf a_val) with
+    | `Ok ->
+        (a, a_val)
+    | `Duplicate ->
+        find_exn phi a
+
+  let new_type_var =
+    let i = ref 0 in
+    fun phi ->
+      let type_var = !i in
+      incr i ;
+      Hashtbl.set phi ~key:type_var ~data:(Node.Leaf None) ;
+      type_var
+
+  let rec free_variables phi a =
+    let a, a_type = find_exn phi a in
+    match a_type with
+    | None ->
+        Int.Set.singleton a
+    | Some (Arrow { arg; ret }) ->
+        Set.union (free_variables phi arg) (free_variables phi ret)
+    | _ ->
+        Int.Set.empty
+
+  let check_no_cycles phi ~alias has_value =
+    let free_variables = free_variables phi has_value in
+    if Set.mem free_variables alias
+    then failwithf "cannot unify: divergent type" ()
+    else ()
+
+  let rec union phi a b =
+    (* get the new leaf's indices as well as their values *)
+    let a, a_type = find_or_insert phi a in
+    let b, b_type = find_or_insert phi b in
+    match (a_type, b_type) with
+    | None, None ->
+        Hashtbl.set phi ~key:a ~data:(Alias b)
+    | Some _a_type, None ->
+        check_no_cycles phi ~alias:b a ;
+        Hashtbl.set phi ~key:b ~data:(Alias a)
+    | None, Some _b_type ->
+        check_no_cycles phi ~alias:a b ;
+        Hashtbl.set phi ~key:a ~data:(Alias b)
+    | Some a_type, Some b_type ->
+        union_types phi ~a ~b (a_type, b_type)
+
+  and union_types phi ~a ~b = function
+    | Arrow { arg = a_arg; ret = a_ret }, Arrow { arg = b_arg; ret = b_ret } ->
+        (* note to self: this could be a point of parallelization,
+             * although we may have to change to random indices instead
+             *
+             * of auto-incrementing onec. *)
+        union phi a_arg b_arg ;
+        union phi a_ret b_ret
+    | a_type, b_type ->
+        failwithf
+          !"incompatible types %{sexp: (IType.t * IType.t)}, for indices %d \
+            and %d in typing environment %{sexp: Node.t Int.Table.t}"
+          (a_type, b_type)
+          a
+          b
+          phi
+          ()
+
+  let union_to phi a type_ =
+    let t = new_type_var phi in
+    Hashtbl.set phi ~key:t ~data:(Leaf (Some type_)) ;
+    union phi a t
+
+  let copy_quantified phi ~quantified_variables ty =
+    let quantified_variables =
+      Set.to_list quantified_variables
+      |> List.map ~f:(fun q -> (q, new_type_var phi))
+      |> Int.Map.of_alist_exn
+    in
+    let rec lp ty =
+      match find_exn phi ty with
+      | ty, None ->
+          (* Return `None` if the variable is not quantified over,
+           * telling the caller that the variable has not changed.
+           *
+           * Return `Some new_type_var` if the variable has been
+           * quantified over, telling the caller that the variable
+           * is now new_type_var.
+           * *)
+          Map.find quantified_variables ty
+      | _, Some String | _, Some Bool | _, Some Int ->
+          None
+      | _, Some (Arrow { arg = ta; ret = tb }) ->
+        (* We pass in the original ta and tb so that we can handle 3 cases with
+         * only one code branch *)
+        ( match (lp ta, lp tb, `A ta, `B tb) with
+        | None, None, _, _ ->
+            None
+        | Some ta, None, _, `B tb
+        | None, Some tb, `A ta, _
+        | Some ta, Some tb, _, _ ->
+            let ty = new_type_var phi in
+            union_to phi ty (Arrow { arg = ta; ret = tb }) ;
+            Some ty )
+    in
+    match lp ty with
+    | None ->
+        (* no variables need to be quantified over *)
+        ty
+    | Some ty ->
+        ty
+end
 
 let rec extract_full_type ~phi a =
-  let a, a_type = find_exn phi a in
+  let a, a_type = Phi.find_exn phi a in
   match a_type with
   | None ->
       Type.Generic a
@@ -49,107 +160,66 @@ let rec extract_full_type ~phi a =
   | Some IType.Int ->
       Type.Int
 
-let find_or_insert phi a =
-  let a_val = None in
-  match Hashtbl.add phi ~key:a ~data:(Leaf a_val) with
-  | `Ok ->
-      (a, a_val)
-  | `Duplicate ->
-      find_exn phi a
+module Polytype = struct
+  type t =
+    | Monotype of int
+    | Polytype of int * Int.Set.t
+  [@@deriving sexp]
+end
 
-let new_type_var =
-  let i = ref 0 in
-  fun phi ->
-    let type_var = !i in
-    incr i ;
-    Hashtbl.set phi ~key:type_var ~data:(Leaf None) ;
-    type_var
+module Env = struct
+  type t = Polytype.t String.Map.t [@@deriving sexp]
 
-let check_no_cycles phi ~alias has_value =
-  let rec free_variables phi a =
-    let a, a_type = find_exn phi a in
-    match a_type with
+  let empty = String.Map.empty
+
+  let add (t : t) x ptype = Map.set t ~key:x ~data:ptype
+
+  let lookup (t : t) name =
+    match Map.find t name with
+    | Some ptype ->
+        ptype
     | None ->
-        Int.Set.singleton a
-    | Some (Arrow { arg; ret }) ->
-        Set.union (free_variables phi arg) (free_variables phi ret)
-    | _ ->
-        Int.Set.empty
-  in
-  let free_variables = free_variables phi has_value in
-  if Set.mem free_variables alias
-  then failwithf "cannot unify: divergent type" ()
-  else ()
+        failwithf "undefined variable %s" name ()
+end
 
-let rec union phi a b =
-  (* get the new leaf's indices as well as their values *)
-  let a, a_type = find_or_insert phi a in
-  let b, b_type = find_or_insert phi b in
-  match (a_type, b_type) with
-  | None, None ->
-      Hashtbl.set phi ~key:a ~data:(Alias b)
-  | Some _a_type, None ->
-      check_no_cycles phi ~alias:b a ;
-      Hashtbl.set phi ~key:b ~data:(Alias a)
-  | None, Some _b_type ->
-      check_no_cycles phi ~alias:a b ;
-      Hashtbl.set phi ~key:a ~data:(Alias b)
-  | Some a_type, Some b_type ->
-      union_types phi ~a ~b (a_type, b_type)
-
-and union_types phi ~a ~b = function
-  | Arrow { arg = a_arg; ret = a_ret }, Arrow { arg = b_arg; ret = b_ret } ->
-      (* note to self: this could be a point of parallelization,
-             * although we may have to change to random indices instead
-             *
-             * of auto-incrementing onec. *)
-      union phi a_arg b_arg ;
-      union phi a_ret b_ret
-  | a_type, b_type ->
-      failwithf
-        !"incompatible types %{sexp: (IType.t * IType.t)}, for indices %d and \
-          %d in typing environment %{sexp: node Int.Table.t}"
-        (a_type, b_type)
-        a
-        b
-        phi
-        ()
-
-let union_to phi a type_ =
-  let t = new_type_var phi in
-  Hashtbl.set phi ~key:t ~data:(Leaf (Some type_)) ;
-  union phi a t
-
-let rec constraints ~env ~phi = function
+let rec constraints ~env ~phi ast =
+  match ast with
   | Ast.Value (k, Ast.Int _i) ->
-      union_to phi k Int
+      Phi.union_to phi k Int
   | Ast.Value (k, Ast.Bool _b) ->
-      union_to phi k Bool
+      Phi.union_to phi k Bool
   | Ast.Value (k, Ast.String _s) ->
-      union_to phi k String
+      Phi.union_to phi k String
   | Ast.Value (k, Ast.Lambda (name, body)) ->
-      let arg = new_type_var phi in
-      let env = Map.set env ~key:name ~data:arg in
+      let arg = Phi.new_type_var phi in
+      let env = Env.add env name (Polytype.Monotype arg) in
       constraints ~env ~phi body ;
       let ret = Ast.metadata body in
-      union_to phi k (Arrow { arg; ret })
+      Phi.union_to phi k (Arrow { arg; ret })
   | Ast.Var (k, name) ->
-      let var_type = Map.find_exn env name in
-      union phi k var_type
+    ( match Env.lookup env name with
+    | Polytype.Monotype var_type ->
+        Phi.union phi k var_type
+    | Polytype.Polytype (var_type, quantified_variables) ->
+        let var_type =
+          Phi.copy_quantified phi ~quantified_variables var_type
+        in
+        Phi.union phi k var_type )
   | Ast.App (k, a_ast, b_ast) ->
       constraints ~env ~phi a_ast ;
       constraints ~env ~phi b_ast ;
       let fn, arg = (Ast.metadata a_ast, Ast.metadata b_ast) in
-      union_to phi fn (Arrow { arg; ret = k })
+      Phi.union_to phi fn (Arrow { arg; ret = k })
   | Ast.Let (k, x, a_ast, b_ast) ->
-      let x_type = Ast.metadata a_ast in
       constraints ~env ~phi a_ast ;
-      let env = Map.set env ~key:x ~data:x_type in
+      let ta = Ast.metadata a_ast in
+      let fvs = Phi.free_variables phi ta in
+      let env = Env.add env x (Polytype.Polytype (ta, fvs)) in
       constraints ~env ~phi b_ast ;
-      union phi k (Ast.metadata b_ast)
+      Phi.union phi k (Ast.metadata b_ast)
 
 let add_type_variables ~phi =
-  let type_var () = new_type_var phi in
+  let type_var () = Phi.new_type_var phi in
   let rec lp = function
     | Ast.Value ((), Ast.Lambda (name, body)) ->
         Ast.Value (type_var (), Ast.Lambda (name, lp body))
@@ -171,7 +241,7 @@ let add_type_variables ~phi =
 let typecheck tree =
   let phi = Int.Table.create () in
   let tree = add_type_variables ~phi tree in
-  constraints ~env:String.Map.empty ~phi tree ;
+  constraints ~env:Env.empty ~phi tree ;
   let rec lp = function
     | Ast.Value (m, Ast.Lambda (name, body)) ->
         Ast.Value (extract_full_type ~phi m, Ast.Lambda (name, lp body))
@@ -223,13 +293,25 @@ let%test_module "type inference tests" =
         type of tree: ('a -> ('b -> 'a))
         evaluated to: \x{ \y{ x } } |}]
 
-    let%expect_test "two variables" =
+    let%expect_test "infer id" =
       lt "id" (fn "x" (var "x")) (lt "_" (app (var "id") (int 2)) (var "id"))
       |> eval_type_and_print ;
       (*! Notice that this is inferred to be monomorphic. The addition of
        * polymorphic type inference will fix that! *)
       [%expect
         {|
-        type of tree: (int -> int)
+        type of tree: ('a -> 'a)
         evaluated to: \x{ x } |}]
+
+    let%expect_test "call id twice" =
+      lt
+        "id"
+        (fn "x" (var "x"))
+        (lt "_" (app (var "id") (int 2)) (app (var "id") (str "hi")))
+      |> eval_type_and_print ;
+      (*! Notice that this is inferred to be monomorphic. The addition of
+       * polymorphic type inference will fix that! *)
+      [%expect {|
+        type of tree: string
+        evaluated to: "hi" |}]
   end )
