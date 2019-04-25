@@ -267,7 +267,7 @@ let%test_module "type inference tests" =
     let eval_type_and_print ast =
       let tree = typecheck ast in
       printf !"type of tree: %{Type}\n" (Ast.metadata tree) ;
-      match Eval.eval ast with
+      match Eval.eval tree with
       | ast ->
           printf "evaluated to: %s" (Ast.to_string ast)
       | exception e ->
@@ -338,4 +338,11 @@ let%test_module "type inference tests" =
         {|
         type of tree: ('a -> 'a)
         evaluated to: \x{ x }  |}]
+
+    (*! currently type checking is not being done for builtins *)
+    let%expect_test "integer operations" =
+      app (app (var "+") (int 2)) (int 3) |> eval_type_and_print ;
+      (*! Notice that this is inferred to be monomorphic. The addition of
+       * polymorphic type inference will fix that! *)
+      [%expect {|idk what to expect!|}]
   end )

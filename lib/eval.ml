@@ -17,31 +17,49 @@ let substitute x a ~within:b =
   in
   lp b
 
-let builtins () :
-    (unit Ast.value * unit Ast.value -> unit Ast.value) String.Map.t =
-  let plus = function
-    | `Int a, `Int b ->
-        `Int (a + b)
-    | _ ->
-        failwithf "type error: plus" ()
+module Builtin = struct
+  let create name typ arity f =
+    object
+      method name = name
+
+      method apply = f
+
+      method typ = typ
+
+      method arity = arity
+    end
+end
+
+let builtins () : 'a String.Map.t =
+  let open Type in
+  let int_to_int = Arrow { arg = Int; ret = Int } in
+  let plus =
+    Builtin.create "plus" int_to_int 2 (function
+        | [ `Int a; `Int b ] ->
+            `Int (a + b)
+        | _ ->
+            failwithf "type error: plus" () )
   in
-  let minus = function
-    | `Int a, `Int b ->
-        `Int (a - b)
-    | _ ->
-        failwithf "type error: minus" ()
+  let minus =
+    Builtin.create "minus" int_to_int 2 (function
+        | [ `Int a; `Int b ] ->
+            `Int (a - b)
+        | _ ->
+            failwithf "type error: minus" () )
   in
-  let divide = function
-    | `Int a, `Int b ->
-        `Int (a / b)
-    | _ ->
-        failwithf "type error: divide" ()
+  let divide =
+    Builtin.create "divide" int_to_int 2 (function
+        | [ `Int a; `Int b ] ->
+            `Int (a / b)
+        | _ ->
+            failwithf "type error: divide" () )
   in
-  let multiply = function
-    | `Int a, `Int b ->
-        `Int (a * b)
-    | _ ->
-        failwithf "type error: multiply" ()
+  let multiply =
+    Builtin.create "multiply" int_to_int 2 (function
+        | [ `Int a; `Int b ] ->
+            `Int (a * b)
+        | _ ->
+            failwithf "type error: multiply" () )
   in
   String.Map.of_alist_exn
     [ ("+", plus); ("-", minus); ("/", divide); ("*", multiply) ]
@@ -52,10 +70,20 @@ let rec step ast =
   match ast with
   | `Value _ ->
       `Done ast
-  | `Var (_, var) ->
-      failwithf "unbound variable %s" var ()
+  | `Var (m, name) ->
+    ( match Map.find (builtins ()) name with
+    | Some builtin ->
+        `Done (`Value (m, `Builtin (builtin, [])))
+    | None ->
+        failwithf "unbound variable %s" name () )
   | `App (_, `Value (_, `Lambda (x, body)), (`Value _ as b)) ->
       `Continue (substitute x b ~within:body)
+  | `App (_, `Value (m, `Builtin (builtin, args)), `Value (_, b)) ->
+      let args = b :: args in
+      (* if the builtin is fully applied,  *)
+      if builtin#arity = List.length args
+      then `Done (`Value (m, builtin#apply args))
+      else `Done (`Value (m, `Builtin (builtin, args)))
   | `App (_, (`Value _ as a), (`Value _ as b)) ->
       (*! make this also print the function *)
       failwithf "expected a function" ()

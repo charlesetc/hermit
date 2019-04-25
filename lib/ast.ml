@@ -25,6 +25,8 @@ let metadata = function
       m
   | `Let (m, _, _, _) ->
       m
+  | `Builtin (m, _) ->
+      m
 
 let map_metadata f =
   let rec lp = function
@@ -51,6 +53,17 @@ let to_string ~add_metadata =
         "\"" ^ String.escaped s ^ "\"" |> add_metadata m
     | `Value (m, `Lambda (x, a)) ->
         "\\" ^ x ^ "{ " ^ lp a ^ " }" |> add_metadata m
+    | `Value (m, `Builtin (builtin, [])) ->
+        (* ignore (m, builtin) ; *)
+        "@" ^ String.escaped builtin#name |> add_metadata m
+    | `Value (m, `Builtin (builtin, args)) ->
+        ignore (m, builtin, args) ;
+        (*! currently cannot print partially-applied builtins
+         *! it'd be good to change that. *)
+        "@[]"
+        (* "@[" ^ String.escaped builtin#name ^ " " *)
+        (* ^ String.concat ~sep:" " (List.map ~f:lp args) *)
+        |> add_metadata m
     | `Var (m, s) ->
         s |> add_metadata m
     | `App (m, a, b) ->
