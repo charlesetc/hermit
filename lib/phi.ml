@@ -1,7 +1,7 @@
 open Core
-module Type_ = Type
+module Full = Type
 
-module Type = struct
+module Type_t = struct
   type t =
     | Arrow of { arg : int; ret : int }
     | String
@@ -13,7 +13,7 @@ end
 module Node = struct
   type t =
     | Alias of int
-    | Leaf of Type.t option
+    | Leaf of Type_t.t option
   [@@deriving sexp]
 end
 
@@ -32,6 +32,26 @@ let rec find_exn phi a =
         a
         phi
         ()
+
+module Type = struct
+  include Type_t
+
+  let rec extract_full_type ~phi a =
+    let a, a_type = find_exn phi a in
+    match a_type with
+    | None ->
+        Full.Generic a
+    | Some (Arrow { arg; ret }) ->
+        let arg = extract_full_type ~phi arg in
+        let ret = extract_full_type ~phi ret in
+        Full.Arrow { arg; ret }
+    | Some Bool ->
+        Full.Bool
+    | Some String ->
+        Full.String
+    | Some Int ->
+        Full.Int
+end
 
 let find_or_insert phi a =
   let a_val = None in
@@ -95,20 +115,18 @@ and union_types phi ~a ~b = function
       ()
   | String, String ->
       ()
-  | a_type, b_type ->
+  | _, _ ->
       failwithf
-        !"incompatible types %{sexp: (Type.t * Type.t)}, for indices %d and \
-          %d in typing environment %{sexp: Node.t Int.Table.t}"
-        (a_type, b_type)
-        a
-        b
-        phi
+        !"incompatible types. expected %{Full}, but got %{Full}"
+        (Type.extract_full_type ~phi a)
+        (Type.extract_full_type ~phi b)
         ()
 
 let union_to phi a type_ =
   let t = new_type_var phi in
+  (* This could be a little confusing if ever "union_to"-ing arrow types *)
   Hashtbl.set phi ~key:t ~data:(Leaf (Some type_)) ;
-  union phi a t
+  union phi t a
 
 let copy_quantified phi ~quantified_variables ty =
   let quantified_variables =

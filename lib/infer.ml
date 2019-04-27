@@ -1,21 +1,5 @@
 open Core
 
-let rec extract_full_type ~phi a =
-  let a, a_type = Phi.find_exn phi a in
-  match a_type with
-  | None ->
-      Type.Generic a
-  | Some (Phi.Type.Arrow { arg; ret }) ->
-      let arg = extract_full_type ~phi arg in
-      let ret = extract_full_type ~phi ret in
-      Type.Arrow { arg; ret }
-  | Some Phi.Type.Bool ->
-      Type.Bool
-  | Some Phi.Type.String ->
-      Type.String
-  | Some Phi.Type.Int ->
-      Type.Int
-
 module Polytype = struct
   type t =
     | Monotype of int
@@ -59,11 +43,6 @@ let rec constraints ~env ~phi ast =
     | None ->
       ( match Builtins.lookup_type phi name with
       | Some var_type ->
-          Core.printf
-            !"%{Source_code_position} var: %s %{Type}\n"
-            [%here]
-            name
-            (extract_full_type ~phi var_type) ;
           Phi.union phi k var_type
       | None ->
           failwithf "undefined variable %s" name () ) )
@@ -106,19 +85,19 @@ let typecheck tree =
   constraints ~env:Env.empty ~phi tree ;
   let rec lp = function
     | `Value (m, `Lambda (name, body)) ->
-        `Value (extract_full_type ~phi m, `Lambda (name, lp body))
+        `Value (Phi.Type.extract_full_type ~phi m, `Lambda (name, lp body))
     | `Value (m, `Int i) ->
-        `Value (extract_full_type ~phi m, `Int i)
+        `Value (Phi.Type.extract_full_type ~phi m, `Int i)
     | `Value (m, `String s) ->
-        `Value (extract_full_type ~phi m, `String s)
+        `Value (Phi.Type.extract_full_type ~phi m, `String s)
     | `Value (m, `Bool b) ->
-        `Value (extract_full_type ~phi m, `Bool b)
+        `Value (Phi.Type.extract_full_type ~phi m, `Bool b)
     | `Var (m, name) ->
-        `Var (extract_full_type ~phi m, name)
+        `Var (Phi.Type.extract_full_type ~phi m, name)
     | `App (m, a, b) ->
-        `App (extract_full_type ~phi m, lp a, lp b)
+        `App (Phi.Type.extract_full_type ~phi m, lp a, lp b)
     | `Let (m, x, a, b) ->
-        `Let (extract_full_type ~phi m, x, lp a, lp b)
+        `Let (Phi.Type.extract_full_type ~phi m, x, lp a, lp b)
   in
   lp tree
 
@@ -129,17 +108,23 @@ let%test_module "type inference tests" =
     let eval_type_and_print ast =
       let tree = typecheck ast in
       printf !"type of tree: %{Type}\n" (Ast.metadata tree) ;
-      match Eval.eval tree with
-      | ast ->
-          printf "evaluated to: %s" (Ast.to_string ast)
-      | exception e ->
-          eprintf !"Got unknown error: %{Exn}" e
+      let ast = Eval.eval tree in
+      printf "evaluated to: %s" (Ast.to_string ast)
+
+    let eval_type_and_print ast =
+      try eval_type_and_print ast with e -> eprintf !"Got error: %{Exn}" e
 
     let%expect_test "one variable" =
       app (fn "x" (var "x")) (int 2) |> eval_type_and_print ;
       [%expect {|
         type of tree: int
         evaluated to: 2 |}]
+
+    let%expect_test "application type error" =
+      app (int 2) (int 2) |> eval_type_and_print ;
+      [%expect
+        {|
+        Got error: (Failure "incompatible types. expected (int -> 'a), but got int") |}]
 
     let%expect_test "printing type variables" =
       fn "x" (var "x") |> eval_type_and_print ;
@@ -206,9 +191,19 @@ let%test_module "type inference tests" =
       app (app (var "+") (int 2)) (int 3) |> eval_type_and_print ;
       (*! Notice that this is inferred to be monomorphic. The addition of
        * polymorphic type inference will fix that! *)
+      [%expect {|
+        type of tree: int
+        evaluated to: 5|}] ;
+      app (app (var "*") (int 2)) (int 3) |> eval_type_and_print ;
+      [%expect {|
+        type of tree: int
+        evaluated to: 6 |}]
+
+    let%expect_test "operation type error" =
+      app (app (var "+") (str "okay")) (str "hi") |> eval_type_and_print ;
+      (*! Notice that this is inferred to be monomorphic. The addition of
+       * polymorphic type inference will fix that! *)
       [%expect
         {|
-        lib/infer.ml:64:12 var: + (int -> (int -> int))
-        type of tree: int
-        evaluated to: 5|}]
+        Got error: (Failure "incompatible types. expected string, but got int")|}]
   end )
