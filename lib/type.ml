@@ -1,12 +1,38 @@
 open Core
 
-type t =
-  | Generic of int
-  | Arrow of { arg : t; ret : t }
-  | String
-  | Bool
-  | Int
-[@@deriving sexp]
+module rec Full_kind : sig
+  type nonrec t [@@deriving sexp, compare]
+end = struct
+  type t =
+    { labels : Kind.Label.t list
+    ; relations : T.t Kind.Label.Map.t
+    }
+  [@@deriving sexp, compare]
+end
+
+and Constraint : Kind.C = Kind.Make_constraint (Full_kind)
+
+and T : sig
+  type t =
+    | Generic of int
+    | Arrow of { arg : t; ret : t }
+    | String
+    | Bool
+    | Int
+    | Kinded of Constraint.Set.t
+  [@@deriving sexp, compare]
+end = struct
+  type t =
+    | Generic of int
+    | Arrow of { arg : t; ret : t }
+    | String
+    | Bool
+    | Int
+    | Kinded of Constraint.Set.t
+  [@@deriving sexp, compare]
+end
+
+include T
 
 let rec to_string = function
   | Generic i ->
@@ -23,6 +49,9 @@ let rec to_string = function
       "int"
   | String ->
       "string"
+  | Kinded constraints ->
+      ignore constraints ;
+      "< >"
 
 let relabel t =
   let state = ref 0 in
@@ -45,3 +74,31 @@ let relabel t =
   lp t
 
 let to_string t = relabel t |> to_string
+
+module Intermediate = struct
+  type t =
+    | Arrow of { arg : int; ret : int }
+    | String
+    | Bool
+    | Int
+    | Kinded of Kind.Intermediate.Constraint.Set.t
+  [@@deriving sexp]
+end
+
+let rec extract_full_type find a =
+  let a, a_type = find a in
+  match a_type with
+  | None ->
+      Generic a
+  | Some (Intermediate.Arrow { arg; ret }) ->
+      let arg = extract_full_type find arg in
+      let ret = extract_full_type find ret in
+      Arrow { arg; ret }
+  | Some Intermediate.Bool ->
+      Bool
+  | Some Intermediate.String ->
+      String
+  | Some Intermediate.Int ->
+      Int
+  | Some (Intermediate.Kinded _constraints) ->
+      raise (Failure "unimplemented")

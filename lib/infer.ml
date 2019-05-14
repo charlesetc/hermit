@@ -3,7 +3,7 @@ open Core
 module Polytype = struct
   type t =
     | Monotype of int
-    | Polytype of int * Int.Set.t
+    | Polytype of int * Int.Set.t * Kind.Intermediate.Constraint.Set.t
   [@@deriving sexp]
 end
 
@@ -35,10 +35,12 @@ let rec constraints ~env ~phi ast =
     ( match Env.lookup env name with
     | Some (Polytype.Monotype var_type) ->
         Phi.union phi k var_type
-    | Some (Polytype.Polytype (var_type, quantified_variables)) ->
-        let var_type =
-          Phi.copy_quantified phi ~quantified_variables var_type
-        in
+    | Some
+        (Polytype.Polytype (var_type, quantified_variables, quantified_kinds))
+      ->
+        ignore quantified_kinds ;
+        let substitution = Substitution.create phi quantified_variables in
+        let var_type = Substitution.apply_to_type substitution phi var_type in
         Phi.union phi k var_type
     | None ->
       ( match Builtins.lookup_type phi name with
@@ -55,7 +57,15 @@ let rec constraints ~env ~phi ast =
       constraints ~env ~phi a_ast ;
       let ta = Ast.metadata a_ast in
       let fvs = Phi.free_variables phi ta in
-      let env = Env.add env x (Polytype.Polytype (ta, fvs)) in
+      let env =
+        Env.add
+          env
+          x
+          (Polytype.Polytype
+             ( ta
+             , fvs
+             , Kind.Intermediate.Constraint.Set.empty (* don't keep this *) ))
+      in
       constraints ~env ~phi b_ast ;
       Phi.union phi k (Ast.metadata b_ast)
 
@@ -82,22 +92,23 @@ let add_type_variables ~phi =
 let typecheck tree =
   let phi = Int.Table.create () in
   let tree = add_type_variables ~phi tree in
+  let extract_full_type = Type.extract_full_type (Phi.find_exn phi) in
   constraints ~env:Env.empty ~phi tree ;
   let rec lp = function
     | `Value (m, `Lambda (name, body)) ->
-        `Value (Phi.Type.extract_full_type ~phi m, `Lambda (name, lp body))
+        `Value (extract_full_type m, `Lambda (name, lp body))
     | `Value (m, `Int i) ->
-        `Value (Phi.Type.extract_full_type ~phi m, `Int i)
+        `Value (extract_full_type m, `Int i)
     | `Value (m, `String s) ->
-        `Value (Phi.Type.extract_full_type ~phi m, `String s)
+        `Value (extract_full_type m, `String s)
     | `Value (m, `Bool b) ->
-        `Value (Phi.Type.extract_full_type ~phi m, `Bool b)
+        `Value (extract_full_type m, `Bool b)
     | `Var (m, name) ->
-        `Var (Phi.Type.extract_full_type ~phi m, name)
+        `Var (extract_full_type m, name)
     | `App (m, a, b) ->
-        `App (Phi.Type.extract_full_type ~phi m, lp a, lp b)
+        `App (extract_full_type m, lp a, lp b)
     | `Let (m, x, a, b) ->
-        `Let (Phi.Type.extract_full_type ~phi m, x, lp a, lp b)
+        `Let (extract_full_type m, x, lp a, lp b)
   in
   lp tree
 

@@ -11,5 +11,6 @@
     ppx_inline_test
     ppx_expect
     ppx_fields_conv
+    ppx_compare
     )))
 

@@ -1,19 +1,9 @@
 open Core
-module Full = Type
-
-module Type_t = struct
-  type t =
-    | Arrow of { arg : int; ret : int }
-    | String
-    | Bool
-    | Int
-  [@@deriving sexp]
-end
 
 module Node = struct
   type t =
     | Alias of int
-    | Leaf of Type_t.t option
+    | Leaf of Type.Intermediate.t option
   [@@deriving sexp]
 end
 
@@ -32,26 +22,6 @@ let rec find_exn phi a =
         a
         phi
         ()
-
-module Type = struct
-  include Type_t
-
-  let rec extract_full_type ~phi a =
-    let a, a_type = find_exn phi a in
-    match a_type with
-    | None ->
-        Full.Generic a
-    | Some (Arrow { arg; ret }) ->
-        let arg = extract_full_type ~phi arg in
-        let ret = extract_full_type ~phi ret in
-        Full.Arrow { arg; ret }
-    | Some Bool ->
-        Full.Bool
-    | Some String ->
-        Full.String
-    | Some Int ->
-        Full.Int
-end
 
 let find_or_insert phi a =
   let a_val = None in
@@ -117,9 +87,9 @@ and union_types phi ~a ~b = function
       ()
   | _, _ ->
       failwithf
-        !"incompatible types. expected %{Full}, but got %{Full}"
-        (Type.extract_full_type ~phi a)
-        (Type.extract_full_type ~phi b)
+        !"incompatible types. expected %{Type}, but got %{Type}"
+        (Type.extract_full_type (find_exn phi) a)
+        (Type.extract_full_type (find_exn phi) b)
         ()
 
 let union_to phi a type_ =
@@ -128,41 +98,4 @@ let union_to phi a type_ =
   Hashtbl.set phi ~key:t ~data:(Leaf (Some type_)) ;
   union phi t a
 
-let copy_quantified phi ~quantified_variables ty =
-  let quantified_variables =
-    Set.to_list quantified_variables
-    |> List.map ~f:(fun q -> (q, new_type_var phi))
-    |> Int.Map.of_alist_exn
-  in
-  let rec lp ty =
-    match find_exn phi ty with
-    | ty, None ->
-        (* Return `None` if the variable is not quantified over,
-           * telling the caller that the variable has not changed.
-           *
-           * Return `Some new_type_var` if the variable has been
-           * quantified over, telling the caller that the variable
-           * is now new_type_var.
-           * *)
-        Map.find quantified_variables ty
-    | _, Some String | _, Some Bool | _, Some Int ->
-        None
-    | _, Some (Arrow { arg = ta; ret = tb }) ->
-      (* We pass in the original ta and tb so that we can handle 3 cases with
-         * only one code branch *)
-      ( match (lp ta, lp tb, `A ta, `B tb) with
-      | None, None, _, _ ->
-          None
-      | Some ta, None, _, `B tb
-      | None, Some tb, `A ta, _
-      | Some ta, Some tb, _, _ ->
-          let ty = new_type_var phi in
-          union_to phi ty (Arrow { arg = ta; ret = tb }) ;
-          Some ty )
-  in
-  match lp ty with
-  | None ->
-      (* no variables need to be quantified over *)
-      ty
-  | Some ty ->
-      ty
+module Substitution = struct end
