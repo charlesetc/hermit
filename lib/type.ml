@@ -64,7 +64,6 @@ module Intermediate = struct
   type index = int [@@deriving sexp, compare]
 
   type t =
-    | Generic of index
     | Arrow of { arg : index; ret : index }
     | String
     | Bool
@@ -77,17 +76,17 @@ include Comparable.Make (T)
 let rec extract_full_type find a =
   let _, a_type = find a in
   match a_type with
-  | Intermediate.Generic a ->
+  | `Generic a ->
       Generic a
-  | Intermediate.Arrow { arg; ret } ->
+  | `Type_leaf (Intermediate.Arrow { arg; ret }) ->
       let arg = extract_full_type find arg in
       let ret = extract_full_type find ret in
       Arrow { arg; ret }
-  | Intermediate.Bool ->
+  | `Type_leaf Intermediate.Bool ->
       Bool
-  | Intermediate.String ->
+  | `Type_leaf Intermediate.String ->
       String
-  | Intermediate.Int ->
+  | `Type_leaf Intermediate.Int ->
       Int
 
 and extract_full_kind find { Kind.Intermediate.labels; relations } =

@@ -10,7 +10,7 @@ let create phi quantified_variables =
 let apply_to_type substitution phi ty =
   let rec lp ty =
     match Phi.find_exn phi ty |> snd with
-    | Generic ty ->
+    | `Generic ty ->
         (* Return `None` if the variable is not quantified over,
            * telling the caller that the variable has not changed.
            *
@@ -19,9 +19,9 @@ let apply_to_type substitution phi ty =
            * is now new_type_var.
            * *)
         Map.find substitution ty
-    | String | Bool | Int ->
+    | `Type_leaf String | `Type_leaf Bool | `Type_leaf Int ->
         None
-    | Arrow { arg = ta; ret = tb } ->
+    | `Type_leaf (Arrow { arg = ta; ret = tb }) ->
       (* We pass in the original ta and tb so that we can handle 3 cases with
          * only one code branch *)
       ( match (lp ta, lp tb, `A ta, `B tb) with

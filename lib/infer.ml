@@ -17,6 +17,7 @@ module Env = struct
   let lookup (t : t) name = Map.find t name
 end
 
+(* reconstruct the constraints from an ast *)
 let rec constraints ~env ~phi ast =
   match ast with
   | `Value (k, `Int _i) ->
@@ -56,16 +57,10 @@ let rec constraints ~env ~phi ast =
   | `Let (k, x, a_ast, b_ast) ->
       constraints ~env ~phi a_ast ;
       let ta = Ast.metadata a_ast in
+      (* sholud probably remove the free variables that are in the environment here. *)
       let fvs = Phi.free_variables phi ta in
-      let env =
-        Env.add
-          env
-          x
-          (Polytype.Polytype
-             ( ta
-             , fvs
-             , Kind.Intermediate.Constraint.Set.empty (* don't keep this *) ))
-      in
+      let contraints = Phi.kind_variables phi (Set.add fvs ta) in
+      let env = Env.add env x (Polytype.Polytype (ta, fvs, contraints)) in
       constraints ~env ~phi b_ast ;
       Phi.union phi k (Ast.metadata b_ast)
 
