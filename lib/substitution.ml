@@ -2,21 +2,15 @@ open Core
 
 type t = int Int.Map.t
 
-(* get new type var and copy any existing kinds *)
-let new_type_var phi q =
-  let v = Phi.new_type_var phi in
-  ignore (q, v) ;
-  raise (Failure "unimplemented")
-
 let create phi quantified_variables =
   Set.to_list quantified_variables
-  |> List.map ~f:(fun q -> (q, new_type_var phi q))
+  |> List.map ~f:(fun q -> (q, Phi.new_type_var phi))
   |> Int.Map.of_alist_exn
 
 let apply_to_type substitution phi ty =
   let rec lp ty =
-    match Phi.find_exn phi ty with
-    | ty, None ->
+    match Phi.find_exn phi ty |> snd with
+    | Generic ty ->
         (* Return `None` if the variable is not quantified over,
            * telling the caller that the variable has not changed.
            *
@@ -25,9 +19,9 @@ let apply_to_type substitution phi ty =
            * is now new_type_var.
            * *)
         Map.find substitution ty
-    | _, Some String | _, Some Bool | _, Some Int ->
+    | String | Bool | Int ->
         None
-    | _, Some (Arrow { arg = ta; ret = tb }) ->
+    | Arrow { arg = ta; ret = tb } ->
       (* We pass in the original ta and tb so that we can handle 3 cases with
          * only one code branch *)
       ( match (lp ta, lp tb, `A ta, `B tb) with
@@ -39,9 +33,6 @@ let apply_to_type substitution phi ty =
           let ty = Phi.new_type_var phi in
           Phi.union_to phi ty (Arrow { arg = ta; ret = tb }) ;
           Some ty )
-    | _, Some (Kinded constraints) ->
-        ignore constraints ;
-        raise (Failure "unimplemented")
   in
   match lp ty with
   | None ->

@@ -1,16 +1,6 @@
 open Core
 
-module rec Full_kind : sig
-  type nonrec t [@@deriving sexp, compare]
-end = struct
-  type t =
-    { labels : Kind.Label.t list
-    ; relations : T.t Kind.Label.Map.t
-    }
-  [@@deriving sexp, compare]
-end
-
-and Constraint : Kind.C = Kind.Make_constraint (Full_kind)
+module rec Full_kind : (Kind.S with type a = T.t) = Kind.Make_kind (T)
 
 and T : sig
   type t =
@@ -19,7 +9,6 @@ and T : sig
     | String
     | Bool
     | Int
-    | Kinded of Constraint.Set.t
   [@@deriving sexp, compare]
 end = struct
   type t =
@@ -28,7 +17,6 @@ end = struct
     | String
     | Bool
     | Int
-    | Kinded of Constraint.Set.t
   [@@deriving sexp, compare]
 end
 
@@ -49,9 +37,6 @@ let rec to_string = function
       "int"
   | String ->
       "string"
-  | Kinded constraints ->
-      ignore constraints ;
-      "< >"
 
 let relabel t =
   let state = ref 0 in
@@ -76,29 +61,35 @@ let relabel t =
 let to_string t = relabel t |> to_string
 
 module Intermediate = struct
+  type index = int [@@deriving sexp, compare]
+
   type t =
-    | Arrow of { arg : int; ret : int }
+    | Generic of index
+    | Arrow of { arg : index; ret : index }
     | String
     | Bool
     | Int
-    | Kinded of Kind.Intermediate.Constraint.Set.t
   [@@deriving sexp]
 end
 
+include Comparable.Make (T)
+
 let rec extract_full_type find a =
-  let a, a_type = find a in
+  let _, a_type = find a in
   match a_type with
-  | None ->
+  | Intermediate.Generic a ->
       Generic a
-  | Some (Intermediate.Arrow { arg; ret }) ->
+  | Intermediate.Arrow { arg; ret } ->
       let arg = extract_full_type find arg in
       let ret = extract_full_type find ret in
       Arrow { arg; ret }
-  | Some Intermediate.Bool ->
+  | Intermediate.Bool ->
       Bool
-  | Some Intermediate.String ->
+  | Intermediate.String ->
       String
-  | Some Intermediate.Int ->
+  | Intermediate.Int ->
       Int
-  | Some (Intermediate.Kinded _constraints) ->
-      raise (Failure "unimplemented")
+
+and extract_full_kind find { Kind.Intermediate.labels; relations } =
+  let relations = Kind.Label.Map.map relations ~f:(extract_full_type find) in
+  { Full_kind.labels; relations }

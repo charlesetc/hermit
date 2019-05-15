@@ -9,38 +9,44 @@ module Label = struct
   include Comparable.Make (T)
 end
 
-module Full = struct end
-
-module Make_constraint (Inner : sig
-  type nonrec t [@@deriving compare, sexp]
+module Make_kind (A : sig
+  type t [@@deriving compare, sexp]
 end) =
 struct
-  type inner = Inner.t
+  type a = A.t [@@deriving compare, sexp]
 
-  module T = struct
-    type nonrec t = int * Inner.t [@@deriving compare, sexp]
+  type t =
+    { labels : Label.t list
+    ; relations : a Label.Map.t
+    }
+  [@@deriving compare, sexp]
+
+  module Constraint = struct
+    module T = struct
+      type nonrec t = a * t [@@deriving compare, sexp]
+    end
+
+    include T
+    include Comparable.Make (T)
   end
-
-  include T
-  include Comparable.Make (T)
 end
 
-module type C = sig
-  type inner
+module type S = sig
+  type a [@@deriving compare, sexp]
 
-  include Comparable.S with type t := int * inner
-end
+  type t =
+    { labels : Label.t list
+    ; relations : a Label.Map.t
+    }
+  [@@deriving compare, sexp]
 
-module Intermediate = struct
-  module T = struct
-    type t =
-      { labels : Label.t list
-      ; relations : int Label.Map.t
-      }
-    [@@deriving compare, sexp]
+  module Constraint : sig
+    include Comparable.S with type t := a * t
+
+    type nonrec t = a * t [@@deriving compare, sexp]
   end
-
-  include T
-
-  module Constraint : C = Make_constraint (T)
 end
+
+module Intermediate : S with type a = int = Make_kind (struct
+  type t = int [@@deriving sexp, compare]
+end)
