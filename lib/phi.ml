@@ -54,9 +54,10 @@ let rec free_variables phi a =
       Int.Set.singleton a
   | `Type_leaf (Arrow { arg; ret }) ->
       Set.union (free_variables phi arg) (free_variables phi ret)
-  | `Kind_leaf constraints ->
-      ignore constraints ;
-      raise (Failure "unimplemented")
+  | `Kind_leaf { Kind.Intermediate.relations; labels = _ } ->
+      Map.data relations
+      |> List.map ~f:(fun a -> free_variables phi a)
+      |> Int.Set.union_list
   | _ ->
       Int.Set.empty
 

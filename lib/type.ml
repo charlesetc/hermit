@@ -1,6 +1,8 @@
 open Core
 
-module rec Full_kind : (Kind.S with type a = T.t) = Kind.Make_kind (T)
+module rec Full_kind : (Kind.S with type a = T.t) = Kind.Make_kind (struct
+  type a = T.t [@@deriving sexp, compare]
+end)
 
 and T : sig
   type t =

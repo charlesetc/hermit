@@ -10,10 +10,10 @@ module Label = struct
 end
 
 module Make_kind (A : sig
-  type t [@@deriving compare, sexp]
+  type a [@@deriving compare, sexp]
 end) =
 struct
-  type a = A.t [@@deriving compare, sexp]
+  type a = A.a [@@deriving compare, sexp]
 
   type t =
     { labels : Label.t list
@@ -48,5 +48,5 @@ module type S = sig
 end
 
 module Intermediate : S with type a = int = Make_kind (struct
-  type t = int [@@deriving sexp, compare]
+  type a = int [@@deriving sexp, compare]
 end)
